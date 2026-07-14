@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS LINE風チャット (グループ編集機能付き)</title>
+    <title>PeerJS LINE風チャット (ユーザー名変更機能付き)</title>
     <style>
         /* LINEダークモード風のデザイン */
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -11,7 +12,9 @@
         
         /* 共通ヘッダー */
         .header { background-color: #191919; padding: 15px; text-align: center; font-size: 1.1em; font-weight: bold; border-bottom: 1px solid #2d2d2d; position: sticky; top: 0; z-index: 10; }
-        .sub-header { font-size: 0.8em; color: #888; font-weight: normal; margin-top: 4px; }
+        .sub-header { font-size: 0.8em; color: #888; font-weight: normal; margin-top: 4px; display: flex; justify-content: center; align-items: center; gap: 5px; }
+        .edit-name-btn { background: none; border: none; color: #06C755; cursor: pointer; font-size: 1em; padding: 2px 5px; border-radius: 4px; }
+        .edit-name-btn:hover { background-color: #2d2d2d; }
 
         /* メインコンテナ */
         .container { max-width: 500px; margin: 0 auto; background-color: #111; min-height: 100vh; display: flex; flex-direction: column; }
@@ -31,7 +34,7 @@
         .talk-item { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #2d2d2d; cursor: pointer; transition: background 0.2s; }
         .talk-item:hover { background-color: #1c1c1c; }
         .talk-icon { width: 45px; height: 45px; border-radius: 50%; background-color: #2b9c3f; display: flex; align-items: center; justify-content: center; font-size: 1.2em; margin-right: 15px; font-weight: bold; flex-shrink: 0; }
-        .talk-info { flex-grow: 1; min-width: 0; } /* min-width: 0 は文字溢れを防ぐため */
+        .talk-info { flex-grow: 1; min-width: 0; }
         .talk-name { font-weight: bold; font-size: 1em; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .talk-desc { font-size: 0.8em; color: #888; }
         
@@ -81,7 +84,10 @@
     <div id="list-screen">
         <div class="header">
             トーク
-            <div class="sub-header">ユーザー: <span id="display-my-name"></span></div>
+            <div class="sub-header">
+                ユーザー: <span id="display-my-name"></span>
+                <button id="change-name-btn" class="edit-name-btn" title="名前を変更">✏️</button>
+            </div>
         </div>
         <div class="add-group-area">
             <input type="text" id="new-group-input" class="input-style" placeholder="新しいグループ名/ルーム名">
@@ -95,7 +101,8 @@
         <div class="chat-header">
             <button class="back-btn" id="back-to-list">＜</button>
             <div style="font-weight: bold; font-size: 1.1em;" id="chat-title">グループチャット</div>
-            <div style="width: 24px;"></div> </div>
+            <div style="width: 24px;"></div>
+        </div>
 
         <div id="chat-box">
             </div>
@@ -126,6 +133,7 @@
     const usernameInput = document.getElementById('username-input');
     const saveNameBtn = document.getElementById('save-name-btn');
     const displayMyName = document.getElementById('display-my-name');
+    const changeNameBtn = document.getElementById('change-name-btn');
     
     const newGroupInput = document.getElementById('new-group-input');
     const addGroupBtn = document.getElementById('add-group-btn');
@@ -147,15 +155,32 @@
         }
     });
 
-    // 名前を保存して進む
+    // 名前の保存（初回）
     saveNameBtn.addEventListener('click', () => {
         const inputVal = usernameInput.value.trim();
         if (!inputVal) return alert('名前を入力してください');
         
-        myName = inputVal;
-        localStorage.setItem('chat_username', myName);
+        saveName(inputVal);
         showListScreen();
     });
+
+    // ユーザー名変更ボタン（✏️）の処理
+    changeNameBtn.addEventListener('click', () => {
+        const newName = prompt('新しいユーザー名を入力してください:', myName);
+        if (newName === null) return; // キャンセル時
+        
+        const trimmedName = newName.trim();
+        if (!trimmedName) return alert('名前を入力してください');
+        
+        saveName(trimmedName);
+        displayMyName.textContent = myName;
+    });
+
+    // ユーザー名を保存する共通関数
+    function saveName(name) {
+        myName = name;
+        localStorage.setItem('chat_username', myName);
+    }
 
     function showListScreen() {
         nameScreen.style.display = 'none';
@@ -180,12 +205,11 @@
         renderGroups();
     });
 
-    // ローカルストレージにグループを保存
     function saveGroupsToLocalStorage() {
         localStorage.setItem('chat_groups', JSON.stringify(groups));
     }
 
-    // グループリストの描画（編集・削除ボタンを追加）
+    // グループリストの描画
     function renderGroups() {
         talkListContainer.innerHTML = '';
         
@@ -200,7 +224,6 @@
             
             const firstChar = groupName.charAt(0).toUpperCase();
 
-            // リストアイテムのHTML構築（右側にアクションボタンを設置）
             li.innerHTML = `
                 <div class="talk-icon">${firstChar}</div>
                 <div class="talk-info" id="info-${index}">
@@ -213,41 +236,38 @@
                 </div>
             `;
 
-            // トーク部分がタップされた時だけチャット画面へ（ボタン部分のタップを無視するため、個別にイベント追加）
             li.querySelector(`#info-${index}`).addEventListener('click', () => {
                 enterChatRoom(groupName);
             });
 
-            // --- 🔧 名前の変更 (編集ボタン) の処理 ---
+            // グループ名変更
             li.querySelector(`#edit-${index}`).addEventListener('click', (e) => {
-                e.stopPropagation(); // 親要素のタップイベント発火（チャット遷移）を防止
+                e.stopPropagation();
                 
                 const newName = prompt(`「${groupName}」の新しいグループ名を入力してください:`, groupName);
-                if (newName === null) return; // キャンセルされた場合
+                if (newName === null) return;
                 
                 const trimmedName = newName.trim();
                 if (!trimmedName) return alert('グループ名が空です');
-                if (trimmedName === groupName) return; // 変更なし
+                if (trimmedName === groupName) return;
                 
                 if (groups.includes(trimmedName)) {
                     return alert('すでに同じ名前のグループが存在します');
                 }
 
-                // 配列のデータを更新
                 groups[index] = trimmedName;
                 saveGroupsToLocalStorage();
-                renderGroups(); // 画面を再描画
+                renderGroups();
             });
 
-            // --- 🗑️ グループの削除 (削除ボタン) の処理 ---
+            // グループ削除
             li.querySelector(`#delete-${index}`).addEventListener('click', (e) => {
-                e.stopPropagation(); // チャット遷移を防止
+                e.stopPropagation();
                 
-                if (confirm(`本当に「${groupName}」グループを削除しますか？\n(チャット相手との接続情報も削除されます)`)) {
-                    // 配列から削除
+                if (confirm(`本当に「${groupName}」グループを削除しますか？`)) {
                     groups.splice(index, 1);
                     saveGroupsToLocalStorage();
-                    renderGroups(); // 画面を再描画
+                    renderGroups();
                 }
             });
 
