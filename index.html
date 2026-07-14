@@ -1,188 +1,338 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS ルームチャット（名前付き）</title>
+    <title>PeerJS LINE風チャット</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f0f2f5; }
-        #chat-box { width: 100%; max-width: 400px; height: 300px; border: 1px solid #ccc; background: white; overflow-y: scroll; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
-        .message { margin-bottom: 8px; padding: 6px 10px; border-radius: 10px; max-width: 70%; word-wrap: break-word; }
-        .my-msg { background-color: #25d366; color: white; margin-left: auto; text-align: right; }
-        .peer-msg { background-color: #e5e5ea; color: black; }
-        .system-msg { color: #888; font-size: 0.9em; text-align: center; max-width: 100%; }
-        .msg-sender { font-size: 0.75em; color: #666; margin-bottom: 2px; display: block; }
-        .my-msg .msg-sender { color: #e0fde0; text-align: right; }
-        .controls { display: flex; flex-direction: column; gap: 10px; max-width: 400px; }
-        .row { display: flex; gap: 5px; }
-        input, button { padding: 8px; font-size: 1em; border-radius: 4px; border: 1px solid #ccc; }
-        input[type="text"] { flex-grow: 1; }
-        button { background-color: #007bff; color: white; cursor: pointer; border: none; }
-        button:hover { background-color: #0056b3; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        /* LINEダークモード風のデザイン */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; background-color: #111; color: #fff; }
+        
+        /* 共通ヘッダー */
+        .header { background-color: #191919; padding: 15px; text-align: center; font-size: 1.1em; font-weight: bold; border-bottom: 1px solid #2d2d2d; position: sticky; top: 0; z-index: 10; }
+        .sub-header { font-size: 0.8em; color: #888; font-weight: normal; margin-top: 4px; }
+
+        /* メインコンテナ */
+        .container { max-width: 500px; margin: 0 auto; background-color: #111; min-height: 100vh; display: flex; flex-direction: column; }
+
+        /* === 1. 名前登録画面 === */
+        #name-screen { padding: 30px 20px; display: flex; flex-direction: column; gap: 20px; justify-content: center; height: 80vh; }
+        .input-style { background-color: #222; border: 1px solid #333; color: white; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; outline: none; }
+        .btn-style { background-color: #06C755; color: white; padding: 12px; font-size: 1em; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; }
+        .btn-style:hover { background-color: #05A848; }
+
+        /* === 2. トーク一覧画面 === */
+        #list-screen { display: none; flex-direction: column; flex-grow: 1; }
+        .add-group-area { padding: 15px; border-bottom: 1px solid #2d2d2d; display: flex; gap: 8px; background-color: #191919; }
+        
+        /* トークリスト */
+        .talk-list { list-style: none; overflow-y: auto; flex-grow: 1; }
+        .talk-item { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #2d2d2d; cursor: pointer; transition: background 0.2s; }
+        .talk-item:hover { background-color: #1c1c1c; }
+        .talk-icon { width: 45px; height: 45px; border-radius: 50%; background-color: #2b9c3f; display: flex; align-items: center; justify-content: center; font-size: 1.2em; margin-right: 15px; font-weight: bold; }
+        .talk-info { flex-grow: 1; }
+        .talk-name { font-weight: bold; font-size: 1em; margin-bottom: 4px; }
+        .talk-desc { font-size: 0.8em; color: #888; }
+
+        /* === 3. チャット画面 === */
+        #chat-screen { display: none; flex-direction: column; height: 100vh; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20; background-color: #111; max-width: 500px; margin: 0 auto; }
+        .chat-header { display: flex; align-items: center; justify-content: space-between; background-color: #191919; padding: 12px 15px; border-bottom: 1px solid #2d2d2d; }
+        .back-btn { background: none; border: none; color: #06C755; font-size: 1.5em; cursor: pointer; }
+        
+        #chat-box { flex-grow: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; background-color: #151e24; }
+        .message { max-width: 75%; display: flex; flex-direction: column; word-wrap: break-word; }
+        .my-msg { align-self: flex-end; }
+        .peer-msg { align-self: flex-start; }
+        
+        .msg-sender { font-size: 0.75em; color: #888; margin-bottom: 3px; }
+        .my-msg .msg-sender { display: none; } /* 自分の名前はメッセージ上に表示しない */
+        
+        .msg-bubble { padding: 10px 14px; border-radius: 18px; font-size: 0.95em; line-height: 1.4; color: #fff; }
+        .my-msg .msg-bubble { background-color: #06C755; border-bottom-right-radius: 2px; }
+        .peer-msg .msg-bubble { background-color: #2c2c2e; border-bottom-left-radius: 2px; }
+        
+        .system-msg { align-self: center; background-color: rgba(255, 255, 255, 0.1); font-size: 0.8em; color: #ccc; padding: 4px 10px; border-radius: 12px; max-width: 90%; text-align: center; }
+
+        /* 送信フォーム */
+        .chat-input-area { background-color: #191919; padding: 10px 15px; display: flex; gap: 8px; border-top: 1px solid #2d2d2d; }
+        .chat-input { flex-grow: 1; }
+        .send-btn { background-color: #06C755; }
+        .send-btn:disabled { background-color: #2d2d2d; color: #555; cursor: not-allowed; }
     </style>
 </head>
 <body>
 
-    <h2>PeerJS ルームチャット</h2>
-    <p>あなたの名前: <strong id="my-display-name"></strong></p>
-    
-    <div class="controls" id="room-selection">
-        <p>同じルーム名を入力して「入室」を押してください。</p>
-        <div class="row">
-            <input type="text" id="room-input" placeholder="例: secret-room-123">
-            <button id="join-btn">ルームに入室</button>
-        </div>
+<div class="container">
+    <div id="name-screen">
+        <h2 style="text-align: center; margin-bottom: 10px;">LINE風チャットへようこそ</h2>
+        <p style="color: #888; text-align: center; font-size: 0.9em;">チャットで使用する名前を入力してください。</p>
+        <input type="text" id="username-input" class="input-style" placeholder="ユーザー名を入力">
+        <button id="save-name-btn" class="btn-style">登録する</button>
     </div>
 
-    <div id="chat-area" style="display: none; margin-top: 20px;">
-        <p>ルーム: <strong id="current-room-name"></strong></p>
+    <div id="list-screen">
+        <div class="header">
+            トーク
+            <div class="sub-header">ユーザー: <span id="display-my-name"></span></div>
+        </div>
+        <div class="add-group-area">
+            <input type="text" id="new-group-input" class="input-style" placeholder="新しいグループ名/ルーム名">
+            <button id="add-group-btn" class="btn-style" style="white-space: nowrap; padding: 0 15px;">作成</button>
+        </div>
+        <ul class="talk-list" id="talk-list-container">
+            </ul>
+    </div>
+
+    <div id="chat-screen">
+        <div class="chat-header">
+            <button class="back-btn" id="back-to-list">＜</button>
+            <div style="font-weight: bold; font-size: 1.1em;" id="chat-title">グループチャット</div>
+            <div style="width: 24px;"></div> </div>
+
         <div id="chat-box">
-            <div class="message system-msg">接続を待機中...</div>
-        </div>
-
-        <div class="controls">
-            <div class="row">
-                <input type="text" id="message-input" placeholder="メッセージを入力" disabled>
-                <button id="send-btn" disabled>送信</button>
             </div>
+
+        <div class="chat-input-area">
+            <input type="text" id="message-input" class="input-style chat-input" placeholder="メッセージを入力..." disabled>
+            <button id="send-btn" class="btn-style send-btn" disabled>送信</button>
         </div>
     </div>
+</div>
 
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-    <script>
-        // --- 1. ページ読み込み時に名前を入力してもらう ---
-        let myName = "";
-        while (!myName) {
-            myName = prompt("あなたのユーザー名を入力してください:", "ユーザー" + Math.floor(Math.random() * 1000));
-            if (myName) myName = myName.trim();
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+    // --- グローバル変数 & データ構造 ---
+    let myName = localStorage.getItem('chat_username') || ''; // ローカルから名前取得
+    let groups = JSON.parse(localStorage.getItem('chat_groups')) || []; // ローカルからグループ一覧取得
+
+    let peer = null;
+    let conn = null;
+    let myRole = ''; 
+    let currentActiveRoom = '';
+
+    // DOM要素の取得
+    const nameScreen = document.getElementById('name-screen');
+    const listScreen = document.getElementById('list-screen');
+    const chatScreen = document.getElementById('chat-screen');
+    
+    const usernameInput = document.getElementById('username-input');
+    const saveNameBtn = document.getElementById('save-name-btn');
+    const displayMyName = document.getElementById('display-my-name');
+    
+    const newGroupInput = document.getElementById('new-group-input');
+    const addGroupBtn = document.getElementById('addGroup-btn');
+    const talkListContainer = document.getElementById('talk-list-container');
+    
+    const chatTitle = document.getElementById('chat-title');
+    const backToListBtn = document.getElementById('back-to-list');
+    const chatBox = document.getElementById('chat-box');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+
+    // --- 1. 初期表示の判定 ---
+    window.addEventListener('load', () => {
+        if (myName) {
+            showListScreen();
+        } else {
+            nameScreen.style.display = 'flex';
+            listScreen.style.display = 'none';
         }
-        document.getElementById('my-display-name').textContent = myName;
+    });
 
-        let peer = null;
-        let conn = null;
-        let myRole = ''; 
-
-        const roomInput = document.getElementById('room-input');
-        const joinBtn = document.getElementById('join-btn');
-        const roomSelection = document.getElementById('room-selection');
-        const chatArea = document.getElementById('chat-area');
-        const currentRoomName = document.getElementById('current-room-name');
+    // 名前をローカルストレージに保存
+    saveNameBtn.addEventListener('click', () => {
+        const inputVal = usernameInput.value.trim();
+        if (!inputVal) return alert('名前を入力してください');
         
-        const chatBox = document.getElementById('chat-box');
-        const messageInput = document.getElementById('message-input');
-        const sendBtn = document.getElementById('send-btn');
+        myName = inputVal;
+        localStorage.setItem('chat_username', myName);
+        showListScreen();
+    });
 
-        joinBtn.addEventListener('click', () => {
-            const roomName = roomInput.value.trim();
-            if (!roomName) return alert('ルーム名を入力してください');
+    // トーク一覧画面を表示する関数
+    function showListScreen() {
+        nameScreen.style.display = 'none';
+        listScreen.style.display = 'flex';
+        displayMyName.textContent = myName;
+        renderGroups();
+    }
 
-            roomSelection.style.display = 'none';
-            chatArea.style.display = 'block';
-            currentRoomName.textContent = roomName;
+    // --- 2. グループ（トーク）の追加と表示 ---
+    document.getElementById('add-group-btn').addEventListener('click', () => {
+        const groupName = newGroupInput.value.trim();
+        if (!groupName) return alert('グループ名を入力してください');
 
-            const hostId = `room-${roomName}-host`;
-            const guestId = `room-${roomName}-guest`;
-
-            peer = new Peer(guestId);
-
-            peer.on('open', (id) => {
-                myRole = 'guest';
-                appendMessage('システム', 'ホストに接続しています...', 'system-msg');
-                conn = peer.connect(hostId);
-                setupConnection();
-            });
-
-            peer.on('error', (err) => {
-                if (myRole === 'guest') {
-                    peer.destroy(); 
-
-                    myRole = 'host';
-                    peer = new Peer(hostId); 
-
-                    peer.on('open', () => {
-                        appendMessage('システム', '最初の入室者です。相手を待っています...', 'system-msg');
-                    });
-
-                    peer.on('connection', (connection) => {
-                        conn = connection;
-                        setupConnection();
-                        appendMessage('システム', '相手が入室しました！', 'system-msg');
-                    });
-                }
-            });
-        });
-
-        // 接続確立後の処理
-        function setupConnection() {
-            conn.on('open', () => {
-                appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
-                messageInput.disabled = false;
-                sendBtn.disabled = false;
-            });
-
-            // --- 2. データを受信したときの処理 ---
-            conn.on('data', (data) => {
-                // 送られてきたデータ(JSON)を解析して、名前とメッセージを取り出す
-                try {
-                    const parsedData = JSON.parse(data);
-                    appendMessage(parsedData.sender, parsedData.text, 'peer-msg');
-                } catch (e) {
-                    // 万が一普通のテキストが送られてきた場合のフォールバック
-                    appendMessage('相手', data, 'peer-msg');
-                }
-            });
-
-            conn.on('close', () => {
-                appendMessage('システム', '相手が退室しました。', 'system-msg');
-                messageInput.disabled = true;
-                sendBtn.disabled = true;
-            });
+        // すでに同じ名前のグループがあるかチェック
+        if (groups.includes(groupName)) {
+            alert('そのグループはすでに作成されています');
+            return;
         }
 
-        // --- 3. メッセージ送信処理 ---
-        function sendMessage() {
-            const msgText = messageInput.value.trim();
-            if (!msgText || !conn) return;
+        groups.push(groupName);
+        localStorage.setItem('chat_groups', JSON.stringify(groups)); // ローカル保存
+        newGroupInput.value = '';
+        renderGroups();
+    });
 
-            // 名前とメッセージをセットにした「オブジェクト」を作って送信する
-            const payload = {
-                sender: myName,
-                text: msgText
-            };
-
-            // JSON形式（文字列）に変換してP2Pで送信
-            conn.send(JSON.stringify(payload));
-
-            // 自分の画面に表示
-            appendMessage(myName, msgText, 'my-msg');
-            messageInput.value = '';
+    // グループリストを画面に描画する
+    function renderGroups() {
+        talkListContainer.innerHTML = '';
+        
+        if (groups.length === 0) {
+            talkListContainer.innerHTML = `<li style="padding: 20px; text-align: center; color: #555; font-size: 0.9em;">作成されたグループはありません</li>`;
+            return;
         }
 
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
-
-        // メッセージ表示関数（名前表示を追加）
-        function appendMessage(sender, text, className) {
-            const msgDiv = document.createElement('div');
-            msgDiv.classList.add('message', className);
-
-            // メッセージの上に送信者の名前を小さく表示する
-            const senderSpan = document.createElement('span');
-            senderSpan.classList.add('msg-sender');
-            senderSpan.textContent = sender;
-
-            const textSpan = document.createElement('span');
-            textSpan.textContent = text;
-
-            msgDiv.appendChild(senderSpan);
-            msgDiv.appendChild(textSpan);
+        groups.forEach(groupName => {
+            const li = document.createElement('li');
+            li.classList.add('talk-item');
             
-            chatBox.appendChild(msgDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
+            // アイコン用の頭文字
+            const firstChar = groupName.charAt(0).toUpperCase();
+
+            li.innerHTML = `
+                <div class="talk-icon">${firstChar}</div>
+                <div class="talk-info">
+                    <div class="talk-name">${groupName}</div>
+                    <div class="talk-desc">タップしてトークに入室</div>
+                </div>
+            `;
+
+            // グループがタップされたらチャット画面へ遷移
+            li.addEventListener('click', () => {
+                enterChatRoom(groupName);
+            });
+
+            talkListContainer.appendChild(li);
+        });
+    }
+
+    // --- 3. チャットルーム入室とWebRTC接続 ---
+    function enterChatRoom(roomName) {
+        currentActiveRoom = roomName;
+        listScreen.style.display = 'none';
+        chatScreen.style.display = 'flex';
+        chatTitle.textContent = roomName;
+        
+        // ログをリセット
+        chatBox.innerHTML = `<div class="message system-msg">「${roomName}」に接続中...</div>`;
+
+        // 接続用のPeerIDを作成（前回のロジックを踏襲）
+        const hostId = `room-${roomName}-host`;
+        const guestId = `room-${roomName}-guest`;
+
+        peer = new Peer(guestId);
+
+        peer.on('open', (id) => {
+            myRole = 'guest';
+            appendMessage('システム', 'ホストを検索中...', 'system-msg');
+            conn = peer.connect(hostId);
+            setupConnection();
+        });
+
+        peer.on('error', (err) => {
+            if (myRole === 'guest') {
+                peer.destroy(); // ゲストを破棄してホストとして再生成
+
+                myRole = 'host';
+                peer = new Peer(hostId);
+
+                peer.on('open', () => {
+                    appendMessage('システム', '最初の入室者です。友達の接続を待っています...', 'system-msg');
+                });
+
+                peer.on('connection', (connection) => {
+                    conn = connection;
+                    setupConnection();
+                    appendMessage('システム', '相手が入室しました！', 'system-msg');
+                });
+            }
+        });
+    }
+
+    // WebRTCコネクションのセットアップ
+    function setupConnection() {
+        conn.on('open', () => {
+            appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+        });
+
+        conn.on('data', (data) => {
+            try {
+                const parsedData = JSON.parse(data);
+                appendMessage(parsedData.sender, parsedData.text, 'peer-msg');
+            } catch (e) {
+                appendMessage('相手', data, 'peer-msg');
+            }
+        });
+
+        conn.on('close', () => {
+            appendMessage('システム', '相手が退室しました。', 'system-msg');
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+        });
+    }
+
+    // メッセージ送信
+    function sendMessage() {
+        const msgText = messageInput.value.trim();
+        if (!msgText || !conn) return;
+
+        const payload = {
+            sender: myName,
+            text: msgText
+        };
+
+        conn.send(JSON.stringify(payload));
+        appendMessage(myName, msgText, 'my-msg');
+        messageInput.value = '';
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 戻るボタンの処理（切断して一覧に戻る）
+    backToListBtn.addEventListener('click', () => {
+        if (conn) conn.close();
+        if (peer) peer.destroy();
+        
+        conn = null;
+        peer = null;
+        currentActiveRoom = '';
+        
+        messageInput.disabled = true;
+        sendBtn.disabled = true;
+
+        chatScreen.style.display = 'none';
+        listScreen.style.display = 'flex';
+    });
+
+    // メッセージ描画関数
+    function appendMessage(sender, text, className) {
+        const msgDiv = document.createElement('div');
+        msgDiv.classList.add('message', className);
+
+        const senderSpan = document.createElement('span');
+        senderSpan.classList.add('msg-sender');
+        senderSpan.textContent = sender;
+
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.classList.add('msg-bubble');
+        bubbleDiv.textContent = text;
+
+        if (className !== 'system-msg') {
+            msgDiv.appendChild(senderSpan);
         }
-    </script>
+        msgDiv.appendChild(bubbleDiv);
+        
+        chatBox.appendChild(msgDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+</script>
 </body>
 </html>
