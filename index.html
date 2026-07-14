@@ -1,14 +1,21 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS LINE風チャット (ユーザー名変更機能付き)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PeerJS LINE風チャット (スマホ最適化版)</title>
     <style>
         /* LINEダークモード風のデザイン */
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif; background-color: #111; color: #fff; }
+        
+        /* html, body の高さをdvh（動的ビューポート）に設定 */
+        html, body { 
+            height: 100dvh; 
+            background-color: #111; 
+            color: #fff; 
+            overflow: hidden; /* スクロールブレを防止 */
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
+        }
         
         /* 共通ヘッダー */
         .header { background-color: #191919; padding: 15px; text-align: center; font-size: 1.1em; font-weight: bold; border-bottom: 1px solid #2d2d2d; position: sticky; top: 0; z-index: 10; }
@@ -17,20 +24,20 @@
         .edit-name-btn:hover { background-color: #2d2d2d; }
 
         /* メインコンテナ */
-        .container { max-width: 500px; margin: 0 auto; background-color: #111; min-height: 100vh; display: flex; flex-direction: column; }
+        .container { max-width: 500px; margin: 0 auto; background-color: #111; height: 100%; display: flex; flex-direction: column; position: relative; }
 
         /* === 1. 名前登録画面 === */
-        #name-screen { padding: 30px 20px; display: flex; flex-direction: column; gap: 20px; justify-content: center; height: 80vh; }
+        #name-screen { padding: 30px 20px; display: flex; flex-direction: column; gap: 20px; justify-content: center; height: 100%; }
         .input-style { background-color: #222; border: 1px solid #333; color: white; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; outline: none; }
         .btn-style { background-color: #06C755; color: white; padding: 12px; font-size: 1em; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; }
         .btn-style:hover { background-color: #05A848; }
 
         /* === 2. トーク一覧画面 === */
-        #list-screen { display: none; flex-direction: column; flex-grow: 1; }
-        .add-group-area { padding: 15px; border-bottom: 1px solid #2d2d2d; display: flex; gap: 8px; background-color: #191919; }
+        #list-screen { display: none; flex-direction: column; height: 100%; }
+        .add-group-area { padding: 15px; border-bottom: 1px solid #2d2d2d; display: flex; gap: 8px; background-color: #191919; flex-shrink: 0; }
         
         /* トークリスト */
-        .talk-list { list-style: none; overflow-y: auto; flex-grow: 1; }
+        .talk-list { list-style: none; overflow-y: auto; flex-grow: 1; -webkit-overflow-scrolling: touch; }
         .talk-item { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #2d2d2d; cursor: pointer; transition: background 0.2s; }
         .talk-item:hover { background-color: #1c1c1c; }
         .talk-icon { width: 45px; height: 45px; border-radius: 50%; background-color: #2b9c3f; display: flex; align-items: center; justify-content: center; font-size: 1.2em; margin-right: 15px; font-weight: bold; flex-shrink: 0; }
@@ -46,11 +53,32 @@
         .delete-btn { color: #e74c3c; }
 
         /* === 3. チャット画面 === */
-        #chat-screen { display: none; flex-direction: column; height: 100vh; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20; background-color: #111; max-width: 500px; margin: 0 auto; }
-        .chat-header { display: flex; align-items: center; justify-content: space-between; background-color: #191919; padding: 12px 15px; border-bottom: 1px solid #2d2d2d; }
+        #chat-screen { 
+            display: none; 
+            flex-direction: column; 
+            /* height: 100dvh の中で絶対配置にすることで、キーボード起動時のズレを防ぐ */
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0; 
+            z-index: 20; 
+            background-color: #111; 
+            width: 100%;
+        }
+        .chat-header { display: flex; align-items: center; justify-content: space-between; background-color: #191919; padding: 12px 15px; border-bottom: 1px solid #2d2d2d; flex-shrink: 0; }
         .back-btn { background: none; border: none; color: #06C755; font-size: 1.5em; cursor: pointer; }
         
-        #chat-box { flex-grow: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; background-color: #151e24; }
+        #chat-box { 
+            flex-grow: 1; 
+            overflow-y: auto; 
+            padding: 15px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 12px; 
+            background-color: #151e24; 
+            -webkit-overflow-scrolling: touch; /* iOSの滑らかなスクロール用 */
+        }
         .message { max-width: 75%; display: flex; flex-direction: column; word-wrap: break-word; }
         .my-msg { align-self: flex-end; }
         .peer-msg { align-self: flex-start; }
@@ -65,7 +93,7 @@
         .system-msg { align-self: center; background-color: rgba(255, 255, 255, 0.1); font-size: 0.8em; color: #ccc; padding: 4px 10px; border-radius: 12px; max-width: 90%; text-align: center; }
 
         /* 送信フォーム */
-        .chat-input-area { background-color: #191919; padding: 10px 15px; display: flex; gap: 8px; border-top: 1px solid #2d2d2d; }
+        .chat-input-area { background-color: #191919; padding: 10px 15px; display: flex; gap: 8px; border-top: 1px solid #2d2d2d; flex-shrink: 0; }
         .chat-input { flex-grow: 1; }
         .send-btn { background-color: #06C755; }
         .send-btn:disabled { background-color: #2d2d2d; color: #555; cursor: not-allowed; }
@@ -153,7 +181,20 @@
             nameScreen.style.display = 'flex';
             listScreen.style.display = 'none';
         }
+        adjustHeightForMobile(); // 初回高さ調節
     });
+
+    // モバイルのキーボード開閉時にビューポートの高さを再設定してスクロールを防ぐ処理
+    // （iOS/Androidでアドレスバーやキーボードが立ち上がった際、強制的に高さをリセットする）
+    window.visualViewport.addEventListener('resize', adjustHeightForMobile);
+    window.visualViewport.addEventListener('scroll', adjustHeightForMobile);
+
+    function adjustHeightForMobile() {
+        const height = window.visualViewport.height;
+        document.body.style.height = `${height}px`;
+        // スクロール可能なチャットエリアを最新の位置に固定
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
 
     // 名前の保存（初回）
     saveNameBtn.addEventListener('click', () => {
@@ -167,7 +208,7 @@
     // ユーザー名変更ボタン（✏️）の処理
     changeNameBtn.addEventListener('click', () => {
         const newName = prompt('新しいユーザー名を入力してください:', myName);
-        if (newName === null) return; // キャンセル時
+        if (newName === null) return; 
         
         const trimmedName = newName.trim();
         if (!trimmedName) return alert('名前を入力してください');
@@ -176,7 +217,6 @@
         displayMyName.textContent = myName;
     });
 
-    // ユーザー名を保存する共通関数
     function saveName(name) {
         myName = name;
         localStorage.setItem('chat_username', myName);
@@ -321,6 +361,8 @@
             appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
             messageInput.disabled = false;
             sendBtn.disabled = false;
+            // 接続完了時、入力欄にフォーカスを当てたり画面位置を調整
+            setTimeout(adjustHeightForMobile, 100);
         });
 
         conn.on('data', (data) => {
@@ -371,6 +413,9 @@
 
         chatScreen.style.display = 'none';
         listScreen.style.display = 'flex';
+        
+        // リセット
+        adjustHeightForMobile();
     });
 
     function appendMessage(sender, text, className) {
