@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS LINE風チャット</title>
+    <title>PeerJS LINE風チャット (グループ編集機能付き)</title>
     <style>
         /* LINEダークモード風のデザイン */
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,10 +30,17 @@
         .talk-list { list-style: none; overflow-y: auto; flex-grow: 1; }
         .talk-item { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #2d2d2d; cursor: pointer; transition: background 0.2s; }
         .talk-item:hover { background-color: #1c1c1c; }
-        .talk-icon { width: 45px; height: 45px; border-radius: 50%; background-color: #2b9c3f; display: flex; align-items: center; justify-content: center; font-size: 1.2em; margin-right: 15px; font-weight: bold; }
-        .talk-info { flex-grow: 1; }
-        .talk-name { font-weight: bold; font-size: 1em; margin-bottom: 4px; }
+        .talk-icon { width: 45px; height: 45px; border-radius: 50%; background-color: #2b9c3f; display: flex; align-items: center; justify-content: center; font-size: 1.2em; margin-right: 15px; font-weight: bold; flex-shrink: 0; }
+        .talk-info { flex-grow: 1; min-width: 0; } /* min-width: 0 は文字溢れを防ぐため */
+        .talk-name { font-weight: bold; font-size: 1em; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .talk-desc { font-size: 0.8em; color: #888; }
+        
+        /* 操作ボタン用のエリア */
+        .talk-actions { display: flex; gap: 10px; margin-left: 10px; }
+        .action-btn { background: none; border: none; font-size: 1.1em; cursor: pointer; padding: 5px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+        .action-btn:hover { background-color: #333; }
+        .edit-btn { color: #3498db; }
+        .delete-btn { color: #e74c3c; }
 
         /* === 3. チャット画面 === */
         #chat-screen { display: none; flex-direction: column; height: 100vh; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20; background-color: #111; max-width: 500px; margin: 0 auto; }
@@ -47,7 +53,7 @@
         .peer-msg { align-self: flex-start; }
         
         .msg-sender { font-size: 0.75em; color: #888; margin-bottom: 3px; }
-        .my-msg .msg-sender { display: none; } /* 自分の名前はメッセージ上に表示しない */
+        .my-msg .msg-sender { display: none; }
         
         .msg-bubble { padding: 10px 14px; border-radius: 18px; font-size: 0.95em; line-height: 1.4; color: #fff; }
         .my-msg .msg-bubble { background-color: #06C755; border-bottom-right-radius: 2px; }
@@ -104,8 +110,8 @@
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
     // --- グローバル変数 & データ構造 ---
-    let myName = localStorage.getItem('chat_username') || ''; // ローカルから名前取得
-    let groups = JSON.parse(localStorage.getItem('chat_groups')) || []; // ローカルからグループ一覧取得
+    let myName = localStorage.getItem('chat_username') || ''; 
+    let groups = JSON.parse(localStorage.getItem('chat_groups')) || []; 
 
     let peer = null;
     let conn = null;
@@ -122,7 +128,7 @@
     const displayMyName = document.getElementById('display-my-name');
     
     const newGroupInput = document.getElementById('new-group-input');
-    const addGroupBtn = document.getElementById('addGroup-btn');
+    const addGroupBtn = document.getElementById('add-group-btn');
     const talkListContainer = document.getElementById('talk-list-container');
     
     const chatTitle = document.getElementById('chat-title');
@@ -141,7 +147,7 @@
         }
     });
 
-    // 名前をローカルストレージに保存
+    // 名前を保存して進む
     saveNameBtn.addEventListener('click', () => {
         const inputVal = usernameInput.value.trim();
         if (!inputVal) return alert('名前を入力してください');
@@ -151,7 +157,6 @@
         showListScreen();
     });
 
-    // トーク一覧画面を表示する関数
     function showListScreen() {
         nameScreen.style.display = 'none';
         listScreen.style.display = 'flex';
@@ -160,23 +165,27 @@
     }
 
     // --- 2. グループ（トーク）の追加と表示 ---
-    document.getElementById('add-group-btn').addEventListener('click', () => {
+    addGroupBtn.addEventListener('click', () => {
         const groupName = newGroupInput.value.trim();
         if (!groupName) return alert('グループ名を入力してください');
 
-        // すでに同じ名前のグループがあるかチェック
         if (groups.includes(groupName)) {
             alert('そのグループはすでに作成されています');
             return;
         }
 
         groups.push(groupName);
-        localStorage.setItem('chat_groups', JSON.stringify(groups)); // ローカル保存
+        saveGroupsToLocalStorage();
         newGroupInput.value = '';
         renderGroups();
     });
 
-    // グループリストを画面に描画する
+    // ローカルストレージにグループを保存
+    function saveGroupsToLocalStorage() {
+        localStorage.setItem('chat_groups', JSON.stringify(groups));
+    }
+
+    // グループリストの描画（編集・削除ボタンを追加）
     function renderGroups() {
         talkListContainer.innerHTML = '';
         
@@ -185,24 +194,61 @@
             return;
         }
 
-        groups.forEach(groupName => {
+        groups.forEach((groupName, index) => {
             const li = document.createElement('li');
             li.classList.add('talk-item');
             
-            // アイコン用の頭文字
             const firstChar = groupName.charAt(0).toUpperCase();
 
+            // リストアイテムのHTML構築（右側にアクションボタンを設置）
             li.innerHTML = `
                 <div class="talk-icon">${firstChar}</div>
-                <div class="talk-info">
+                <div class="talk-info" id="info-${index}">
                     <div class="talk-name">${groupName}</div>
                     <div class="talk-desc">タップしてトークに入室</div>
                 </div>
+                <div class="talk-actions">
+                    <button class="action-btn edit-btn" title="名前を変更" id="edit-${index}">✏️</button>
+                    <button class="action-btn delete-btn" title="削除" id="delete-${index}">🗑️</button>
+                </div>
             `;
 
-            // グループがタップされたらチャット画面へ遷移
-            li.addEventListener('click', () => {
+            // トーク部分がタップされた時だけチャット画面へ（ボタン部分のタップを無視するため、個別にイベント追加）
+            li.querySelector(`#info-${index}`).addEventListener('click', () => {
                 enterChatRoom(groupName);
+            });
+
+            // --- 🔧 名前の変更 (編集ボタン) の処理 ---
+            li.querySelector(`#edit-${index}`).addEventListener('click', (e) => {
+                e.stopPropagation(); // 親要素のタップイベント発火（チャット遷移）を防止
+                
+                const newName = prompt(`「${groupName}」の新しいグループ名を入力してください:`, groupName);
+                if (newName === null) return; // キャンセルされた場合
+                
+                const trimmedName = newName.trim();
+                if (!trimmedName) return alert('グループ名が空です');
+                if (trimmedName === groupName) return; // 変更なし
+                
+                if (groups.includes(trimmedName)) {
+                    return alert('すでに同じ名前のグループが存在します');
+                }
+
+                // 配列のデータを更新
+                groups[index] = trimmedName;
+                saveGroupsToLocalStorage();
+                renderGroups(); // 画面を再描画
+            });
+
+            // --- 🗑️ グループの削除 (削除ボタン) の処理 ---
+            li.querySelector(`#delete-${index}`).addEventListener('click', (e) => {
+                e.stopPropagation(); // チャット遷移を防止
+                
+                if (confirm(`本当に「${groupName}」グループを削除しますか？\n(チャット相手との接続情報も削除されます)`)) {
+                    // 配列から削除
+                    groups.splice(index, 1);
+                    saveGroupsToLocalStorage();
+                    renderGroups(); // 画面を再描画
+                }
             });
 
             talkListContainer.appendChild(li);
@@ -216,10 +262,8 @@
         chatScreen.style.display = 'flex';
         chatTitle.textContent = roomName;
         
-        // ログをリセット
         chatBox.innerHTML = `<div class="message system-msg">「${roomName}」に接続中...</div>`;
 
-        // 接続用のPeerIDを作成（前回のロジックを踏襲）
         const hostId = `room-${roomName}-host`;
         const guestId = `room-${roomName}-guest`;
 
@@ -234,7 +278,7 @@
 
         peer.on('error', (err) => {
             if (myRole === 'guest') {
-                peer.destroy(); // ゲストを破棄してホストとして再生成
+                peer.destroy(); 
 
                 myRole = 'host';
                 peer = new Peer(hostId);
@@ -252,7 +296,6 @@
         });
     }
 
-    // WebRTCコネクションのセットアップ
     function setupConnection() {
         conn.on('open', () => {
             appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
@@ -276,7 +319,6 @@
         });
     }
 
-    // メッセージ送信
     function sendMessage() {
         const msgText = messageInput.value.trim();
         if (!msgText || !conn) return;
@@ -296,7 +338,6 @@
         if (e.key === 'Enter') sendMessage();
     });
 
-    // 戻るボタンの処理（切断して一覧に戻る）
     backToListBtn.addEventListener('click', () => {
         if (conn) conn.close();
         if (peer) peer.destroy();
@@ -312,7 +353,6 @@
         listScreen.style.display = 'flex';
     });
 
-    // メッセージ描画関数
     function appendMessage(sender, text, className) {
         const msgDiv = document.createElement('div');
         msgDiv.classList.add('message', className);
