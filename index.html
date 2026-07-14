@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PeerJS 1対1チャット</title>
+    <title>PeerJS ルームチャット</title>
     <style>
         body { font-family: sans-serif; margin: 20px; background-color: #f0f2f5; }
         #chat-box { width: 100%; max-width: 400px; height: 300px; border: 1px solid #ccc; background: white; overflow-y: scroll; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
@@ -17,97 +18,126 @@
         input[type="text"] { flex-grow: 1; }
         button { background-color: #007bff; color: white; cursor: pointer; border: none; }
         button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
     </style>
 </head>
 <body>
 
-    <h2>PeerJS チャット</h2>
+    <h2>PeerJS ルームチャット</h2>
     
-    <div class="controls">
-        <div>
-            <strong>あなたのID:</strong> <span id="my-id">読み込み中...</span>
-        </div>
+    <div class="controls" id="room-selection">
+        <p>同じルーム名を入力して「入室」を押してください。</p>
         <div class="row">
-            <input type="text" id="peer-id-input" placeholder="相手のIDを入力">
-            <button id="connect-btn">接続</button>
+            <input type="text" id="room-input" placeholder="例: secret-room-123">
+            <button id="join-btn">ルームに入室</button>
         </div>
     </div>
 
-    <br>
+    <div id="chat-area" style="display: none; margin-top: 20px;">
+        <p>ルーム: <strong id="current-room-name"></strong></p>
+        <div id="chat-box">
+            <div class="message system-msg">接続を待機中...</div>
+        </div>
 
-    <div id="chat-box">
-        <div class="message system-msg">IDを共有して接続してください。</div>
-    </div>
-
-    <div class="controls">
-        <div class="row">
-            <input type="text" id="message-input" placeholder="メッセージを入力" disabled>
-            <button id="send-btn" disabled>送信</button>
+        <div class="controls">
+            <div class="row">
+                <input type="text" id="message-input" placeholder="メッセージを入力" disabled>
+                <button id="send-btn" disabled>送信</button>
+            </div>
         </div>
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script>
-        // Peerオブジェクトの作成（PeerJSが提供する無料のシグナリングサーバーを利用）
-        const peer = new Peer();
+        let peer = null;
         let conn = null;
+        let myRole = ''; // 'host' (部屋を作った側) か 'guest' (入った側)
 
-        const myIdSpan = document.getElementById('my-id');
-        const peerIdInput = document.getElementById('peer-id-input');
-        const connectBtn = document.getElementById('connect-btn');
+        const roomInput = document.getElementById('room-input');
+        const joinBtn = document.getElementById('join-btn');
+        const roomSelection = document.getElementById('room-selection');
+        const chatArea = document.getElementById('chat-area');
+        const currentRoomName = document.getElementById('current-room-name');
+        
         const chatBox = document.getElementById('chat-box');
         const messageInput = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
 
-        // 自分のIDが発行されたとき
-        peer.on('open', (id) => {
-            myIdSpan.textContent = id;
+        joinBtn.addEventListener('click', () => {
+            const roomName = roomInput.value.trim();
+            if (!roomName) return alert('ルーム名を入力してください');
+
+            // 画面の切り替え
+            roomSelection.style.display = 'none';
+            chatArea.style.display = 'block';
+            currentRoomName.textContent = roomName;
+
+            // ルーム名をもとに、2つの異なるPeerIDを作る
+            // 1人目（ホスト）: ルーム名-host
+            // 2人目（ゲスト）: ルーム名-guest
+            const hostId = `room-${roomName}-host`;
+            const guestId = `room-${roomName}-guest`;
+
+            // まずは「ゲスト（2人目）」として自分を登録してみる
+            peer = new Peer(guestId);
+
+            peer.on('open', (id) => {
+                // 自分がゲストとして登録できたら、ホスト（1人目）に接続を試みる
+                myRole = 'guest';
+                appendMessage('システム', 'ホストに接続しています...', 'system-msg');
+                conn = peer.connect(hostId);
+                setupConnection();
+            });
+
+            // もし「すでにそのゲストIDが使われている」または「エラー（誰もホストにいない）」になったら
+            peer.on('error', (err) => {
+                // ゲスト登録に失敗した場合、自分が「ホスト（1人目）」として登録し直す
+                if (myRole === 'guest') {
+                    peer.destroy(); // 一度ゲストとしてのインスタンスを破棄
+
+                    myRole = 'host';
+                    peer = new Peer(hostId); // ホストとして再起動
+
+                    peer.on('open', () => {
+                        appendMessage('system', 'あなたが最初の入室者です。相手の入室を待っています...', 'system-msg');
+                    });
+
+                    // ゲスト（2人目）が来たら接続を受ける
+                    peer.on('connection', (connection) => {
+                        conn = connection;
+                        setupConnection();
+                        appendMessage('システム', '相手が入室しました！', 'system-msg');
+                    });
+                }
+            });
         });
 
-        // 相手から接続されたとき（受信側）
-        peer.on('connection', (connection) => {
-            conn = connection;
-            setupConnection();
-            appendMessage('システム', '相手が接続しました！', 'system-msg');
-        });
-
-        // 接続ボタンを押したとき（発信側）
-        connectBtn.addEventListener('click', () => {
-            const peerId = peerIdInput.value.trim();
-            if (!peerId) return alert('相手のIDを入力してください');
-
-            conn = peer.connect(peerId);
-            setupConnection();
-            appendMessage('システム', '接続を試みています...', 'system-msg');
-        });
-
-        // 接続が確立した後のデータ送受信ルール
+        // 接続が確立した後のルール
         function setupConnection() {
             conn.on('open', () => {
-                appendMessage('システム', 'チャットが利用可能です。', 'system-msg');
+                appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
             });
 
-            // メッセージを受信したとき
             conn.on('data', (data) => {
                 appendMessage('相手', data, 'peer-msg');
             });
 
             conn.on('close', () => {
-                appendMessage('システム', '接続が切断されました。', 'system-msg');
+                appendMessage('システム', '相手が退室しました。', 'system-msg');
                 messageInput.disabled = true;
                 sendBtn.disabled = true;
             });
         }
 
-        // メッセージ送信処理
+        // メッセージ送信
         function sendMessage() {
             const msg = messageInput.value.trim();
             if (!msg || !conn) return;
 
-            conn.send(msg); // 相手に送信
-            appendMessage('自分', msg, 'my-msg'); // 自分の画面に表示
+            conn.send(msg);
+            appendMessage('自分', msg, 'my-msg');
             messageInput.value = '';
         }
 
@@ -116,13 +146,12 @@
             if (e.key === 'Enter') sendMessage();
         });
 
-        // 画面にメッセージを追加する関数
         function appendMessage(sender, text, className) {
             const msgDiv = document.createElement('div');
             msgDiv.classList.add('message', className);
             msgDiv.textContent = text;
             chatBox.appendChild(msgDiv);
-            chatBox.scrollTop = chatBox.scrollHeight; // 一番下までスクロール
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
     </script>
 </body>
