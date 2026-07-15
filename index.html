@@ -3,17 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PeerJS LINE風チャット (スマホ最適化版)</title>
+    <title>PeerJS LINE風チャット (未接続時送信・自動再送対応版)</title>
     <style>
         /* LINEダークモード風のデザイン */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         
-        /* html, body の高さをdvh（動的ビューポート）に設定 */
         html, body { 
             height: 100dvh; 
             background-color: #111; 
             color: #fff; 
-            overflow: hidden; /* スクロールブレを防止 */
+            overflow: hidden; 
             font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
         }
         
@@ -56,7 +55,6 @@
         #chat-screen { 
             display: none; 
             flex-direction: column; 
-            /* height: 100dvh の中で絶対配置にすることで、キーボード起動時のズレを防ぐ */
             position: absolute; 
             top: 0; 
             left: 0; 
@@ -77,7 +75,7 @@
             flex-direction: column; 
             gap: 12px; 
             background-color: #151e24; 
-            -webkit-overflow-scrolling: touch; /* iOSの滑らかなスクロール用 */
+            -webkit-overflow-scrolling: touch; 
         }
         .message { max-width: 75%; display: flex; flex-direction: column; word-wrap: break-word; }
         .my-msg { align-self: flex-end; }
@@ -136,8 +134,8 @@
             </div>
 
         <div class="chat-input-area">
-            <input type="text" id="message-input" class="input-style chat-input" placeholder="メッセージを入力..." disabled>
-            <button id="send-btn" class="btn-style send-btn" disabled>送信</button>
+            <input type="text" id="message-input" class="input-style chat-input" placeholder="メッセージを入力...">
+            <button id="send-btn" class="btn-style send-btn">送信</button>
         </div>
     </div>
 </div>
@@ -152,6 +150,9 @@
     let conn = null;
     let myRole = ''; 
     let currentActiveRoom = '';
+    
+    // 【新規】未接続の間に送信したメッセージを一時保存するキュー（配列）
+    let messageQueue = [];
 
     // DOM要素の取得
     const nameScreen = document.getElementById('name-screen');
@@ -181,18 +182,15 @@
             nameScreen.style.display = 'flex';
             listScreen.style.display = 'none';
         }
-        adjustHeightForMobile(); // 初回高さ調節
+        adjustHeightForMobile();
     });
 
-    // モバイルのキーボード開閉時にビューポートの高さを再設定してスクロールを防ぐ処理
-    // （iOS/Androidでアドレスバーやキーボードが立ち上がった際、強制的に高さをリセットする）
     window.visualViewport.addEventListener('resize', adjustHeightForMobile);
     window.visualViewport.addEventListener('scroll', adjustHeightForMobile);
 
     function adjustHeightForMobile() {
         const height = window.visualViewport.height;
         document.body.style.height = `${height}px`;
-        // スクロール可能なチャットエリアを最新の位置に固定
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
@@ -205,7 +203,7 @@
         showListScreen();
     });
 
-    // ユーザー名変更ボタン（✏️）の処理
+    // ユーザー名変更
     changeNameBtn.addEventListener('click', () => {
         const newName = prompt('新しいユーザー名を入力してください:', myName);
         if (newName === null) return; 
@@ -280,30 +278,22 @@
                 enterChatRoom(groupName);
             });
 
-            // グループ名変更
             li.querySelector(`#edit-${index}`).addEventListener('click', (e) => {
                 e.stopPropagation();
-                
                 const newName = prompt(`「${groupName}」の新しいグループ名を入力してください:`, groupName);
                 if (newName === null) return;
-                
                 const trimmedName = newName.trim();
                 if (!trimmedName) return alert('グループ名が空です');
                 if (trimmedName === groupName) return;
-                
-                if (groups.includes(trimmedName)) {
-                    return alert('すでに同じ名前のグループが存在します');
-                }
+                if (groups.includes(trimmedName)) return alert('すでに同じ名前のグループが存在します');
 
                 groups[index] = trimmedName;
                 saveGroupsToLocalStorage();
                 renderGroups();
             });
 
-            // グループ削除
             li.querySelector(`#delete-${index}`).addEventListener('click', (e) => {
                 e.stopPropagation();
-                
                 if (confirm(`本当に「${groupName}」グループを削除しますか？`)) {
                     groups.splice(index, 1);
                     saveGroupsToLocalStorage();
@@ -322,6 +312,8 @@
         chatScreen.style.display = 'flex';
         chatTitle.textContent = roomName;
         
+        // メッセージキューを空にする
+        messageQueue = [];
         chatBox.innerHTML = `<div class="message system-msg">「${roomName}」に接続中...</div>`;
 
         const hostId = `room-${roomName}-host`;
@@ -356,12 +348,20 @@
         });
     }
 
+    // 接続確立後のセットアップ
     function setupConnection() {
         conn.on('open', () => {
             appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
-            messageInput.disabled = false;
-            sendBtn.disabled = false;
-            // 接続完了時、入力欄にフォーカスを当てたり画面位置を調整
+            
+            // 【新規】接続が繋がった瞬間に、溜まっていた未送信メッセージをすべて送信する
+            if (messageQueue.length > 0) {
+                appendMessage('システム', `未送信メッセージを ${messageQueue.length} 件送信中...`, 'system-msg');
+                messageQueue.forEach(payload => {
+                    conn.send(JSON.stringify(payload));
+                });
+                messageQueue = []; // 送信完了したのでキューを空にする
+            }
+            
             setTimeout(adjustHeightForMobile, 100);
         });
 
@@ -375,22 +375,31 @@
         });
 
         conn.on('close', () => {
-            appendMessage('システム', '相手が退室しました。', 'system-msg');
-            messageInput.disabled = true;
-            sendBtn.disabled = true;
+            appendMessage('システム', '相手が退室しました。再接続を待っています...', 'system-msg');
         });
     }
 
+    // メッセージ送信処理
     function sendMessage() {
         const msgText = messageInput.value.trim();
-        if (!msgText || !conn) return;
+        if (!msgText) return;
 
         const payload = {
             sender: myName,
             text: msgText
         };
 
-        conn.send(JSON.stringify(payload));
+        // 接続がまだ成立しているかチェック
+        if (conn && conn.open) {
+            // 通常送信
+            conn.send(JSON.stringify(payload));
+        } else {
+            // 【新規】まだ繋がっていない場合は、キュー（配列）に一時保存する
+            messageQueue.push(payload);
+            // 自分の画面にだけ「(未送信)」など分かりやすいマークを付けて出しても便利です
+        }
+
+        // 自分の画面には即座に反映
         appendMessage(myName, msgText, 'my-msg');
         messageInput.value = '';
     }
@@ -407,14 +416,10 @@
         conn = null;
         peer = null;
         currentActiveRoom = '';
-        
-        messageInput.disabled = true;
-        sendBtn.disabled = true;
+        messageQueue = []; // キューのクリア
 
         chatScreen.style.display = 'none';
         listScreen.style.display = 'flex';
-        
-        // リセット
         adjustHeightForMobile();
     });
 
