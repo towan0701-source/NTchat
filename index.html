@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PeerJS LINE風チャット (未接続時送信・自動再送対応版)</title>
+    <title>PeerJS LINE風チャット (ログ保存版)</title>
     <style>
         /* LINEダークモード風のデザイン */
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -145,13 +145,14 @@
     // --- グローバル変数 & データ構造 ---
     let myName = localStorage.getItem('chat_username') || ''; 
     let groups = JSON.parse(localStorage.getItem('chat_groups')) || []; 
+    
+    // 【新規】チャット履歴をグループごとに保持するオブジェクト
+    let chatLogs = JSON.parse(localStorage.getItem('chat_logs')) || {};
 
     let peer = null;
     let conn = null;
     let myRole = ''; 
     let currentActiveRoom = '';
-    
-    // 【新規】未接続の間に送信したメッセージを一時保存するキュー（配列）
     let messageQueue = [];
 
     // DOM要素の取得
@@ -278,6 +279,7 @@
                 enterChatRoom(groupName);
             });
 
+            // グループ名変更
             li.querySelector(`#edit-${index}`).addEventListener('click', (e) => {
                 e.stopPropagation();
                 const newName = prompt(`「${groupName}」の新しいグループ名を入力してください:`, groupName);
@@ -287,14 +289,26 @@
                 if (trimmedName === groupName) return;
                 if (groups.includes(trimmedName)) return alert('すでに同じ名前のグループが存在します');
 
+                // ログデータのキー名も書き換える
+                if (chatLogs[groupName]) {
+                    chatLogs[trimmedName] = chatLogs[groupName];
+                    delete chatLogs[groupName];
+                    localStorage.setItem('chat_logs', JSON.stringify(chatLogs));
+                }
+
                 groups[index] = trimmedName;
                 saveGroupsToLocalStorage();
                 renderGroups();
             });
 
+            // グループ削除
             li.querySelector(`#delete-${index}`).addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (confirm(`本当に「${groupName}」グループを削除しますか？`)) {
+                if (confirm(`本当に「${groupName}」グループを削除しますか？\n(このグループのチャット履歴も完全に削除されます)`)) {
+                    // このグループのログも削除
+                    delete chatLogs[groupName];
+                    localStorage.setItem('chat_logs', JSON.stringify(chatLogs));
+
                     groups.splice(index, 1);
                     saveGroupsToLocalStorage();
                     renderGroups();
@@ -312,9 +326,19 @@
         chatScreen.style.display = 'flex';
         chatTitle.textContent = roomName;
         
-        // メッセージキューを空にする
         messageQueue = [];
-        chatBox.innerHTML = `<div class="message system-msg">「${roomName}」に接続中...</div>`;
+        chatBox.innerHTML = ''; // 一旦クリア
+
+        // 【新規】このグループの過去ログが存在すれば、まず画面に復元（描画）する
+        if (chatLogs[roomName]) {
+            chatLogs[roomName].forEach(log => {
+                // 保存されている履歴を表示
+                appendMessageToUI(log.sender, log.text, log.className);
+            });
+            appendMessageToUI('システム', '--- 過去のメッセージ ---', 'system-msg');
+        }
+
+        appendMessageToUI('システム', '接続を開始中...', 'system-msg');
 
         const hostId = `room-${roomName}-host`;
         const guestId = `room-${roomName}-guest`;
@@ -323,7 +347,7 @@
 
         peer.on('open', (id) => {
             myRole = 'guest';
-            appendMessage('システム', 'ホストを検索中...', 'system-msg');
+            appendMessageToUI('システム', 'ホストを検索中...', 'system-msg');
             conn = peer.connect(hostId);
             setupConnection();
         });
@@ -336,13 +360,13 @@
                 peer = new Peer(hostId);
 
                 peer.on('open', () => {
-                    appendMessage('システム', '最初の入室者です。友達の接続を待っています...', 'system-msg');
+                    appendMessageToUI('システム', '最初の入室者です。友達の接続を待っています...', 'system-msg');
                 });
 
                 peer.on('connection', (connection) => {
                     conn = connection;
                     setupConnection();
-                    appendMessage('システム', '相手が入室しました！', 'system-msg');
+                    appendMessageToUI('システム', '相手が入室しました！', 'system-msg');
                 });
             }
         });
@@ -351,15 +375,14 @@
     // 接続確立後のセットアップ
     function setupConnection() {
         conn.on('open', () => {
-            appendMessage('システム', 'チャットが繋がりました！', 'system-msg');
+            appendMessageToUI('システム', 'チャットが繋がりました！', 'system-msg');
             
-            // 【新規】接続が繋がった瞬間に、溜まっていた未送信メッセージをすべて送信する
             if (messageQueue.length > 0) {
-                appendMessage('システム', `未送信メッセージを ${messageQueue.length} 件送信中...`, 'system-msg');
+                appendMessageToUI('システム', `未送信メッセージを ${messageQueue.length} 件送信中...`, 'system-msg');
                 messageQueue.forEach(payload => {
                     conn.send(JSON.stringify(payload));
                 });
-                messageQueue = []; // 送信完了したのでキューを空にする
+                messageQueue = []; 
             }
             
             setTimeout(adjustHeightForMobile, 100);
@@ -368,14 +391,15 @@
         conn.on('data', (data) => {
             try {
                 const parsedData = JSON.parse(data);
-                appendMessage(parsedData.sender, parsedData.text, 'peer-msg');
+                // 【新規】受信メッセージを画面追加 ＆ ログ保存
+                appendMessageAndSave(parsedData.sender, parsedData.text, 'peer-msg');
             } catch (e) {
-                appendMessage('相手', data, 'peer-msg');
+                appendMessageAndSave('相手', data, 'peer-msg');
             }
         });
 
         conn.on('close', () => {
-            appendMessage('システム', '相手が退室しました。再接続を待っています...', 'system-msg');
+            appendMessageToUI('システム', '相手が退室しました。再接続を待っています...', 'system-msg');
         });
     }
 
@@ -389,18 +413,14 @@
             text: msgText
         };
 
-        // 接続がまだ成立しているかチェック
         if (conn && conn.open) {
-            // 通常送信
             conn.send(JSON.stringify(payload));
         } else {
-            // 【新規】まだ繋がっていない場合は、キュー（配列）に一時保存する
             messageQueue.push(payload);
-            // 自分の画面にだけ「(未送信)」など分かりやすいマークを付けて出しても便利です
         }
 
-        // 自分の画面には即座に反映
-        appendMessage(myName, msgText, 'my-msg');
+        // 【新規】自分のメッセージを画面追加 ＆ ログ保存
+        appendMessageAndSave(myName, msgText, 'my-msg');
         messageInput.value = '';
     }
 
@@ -416,14 +436,30 @@
         conn = null;
         peer = null;
         currentActiveRoom = '';
-        messageQueue = []; // キューのクリア
+        messageQueue = []; 
 
         chatScreen.style.display = 'none';
         listScreen.style.display = 'flex';
         adjustHeightForMobile();
     });
 
-    function appendMessage(sender, text, className) {
+    // 【新規】メッセージを表示し、かつローカルに保存する関数
+    function appendMessageAndSave(sender, text, className) {
+        // 1. 画面に追加
+        appendMessageToUI(sender, text, className);
+
+        // 2. ログに保存（システムメッセージは保存から除外）
+        if (className !== 'system-msg') {
+            if (!chatLogs[currentActiveRoom]) {
+                chatLogs[currentActiveRoom] = [];
+            }
+            chatLogs[currentActiveRoom].push({ sender, text, className });
+            localStorage.setItem('chat_logs', JSON.stringify(chatLogs));
+        }
+    }
+
+    // メッセージを画面上のUIに組み立てて描画するだけの関数
+    function appendMessageToUI(sender, text, className) {
         const msgDiv = document.createElement('div');
         msgDiv.classList.add('message', className);
 
